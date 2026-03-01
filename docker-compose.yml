@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: oga_postgres
+    env_file:
+      - ./config/.env
+    ports:
+      - "5437:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  etl_service:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+    container_name: oga_etl
+    env_file:
+      - ./config/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./src:/app/src
+    command: ["python", "-m", "src.main"]
+
+  api_service:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: oga_api
+    env_file:
+      - ./config/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/app/api
+      - ./config:/app/config
+
+volumes:
+  db_data:

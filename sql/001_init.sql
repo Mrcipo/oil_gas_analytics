@@ -1,0 +1,6 @@
+﻿CREATE TABLE IF NOT EXISTS etl_runs (
+  id BIGSERIAL PRIMARY KEY,
+  records_loaded INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
