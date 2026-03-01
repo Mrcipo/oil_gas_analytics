@@ -17,6 +17,8 @@ docker-compose up --build
 
 Requiere `config/.env` con credenciales de PostgreSQL para los servicios.
 
+Para replicar la estructura de carpetas de este proyecto, ejecuta `./setup_project.sh` en tu terminal.
+
 ## Endpoints API
 - `GET http://localhost:8000/health`
 - `GET http://localhost:8000/runs`
