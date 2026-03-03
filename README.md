@@ -17,6 +17,13 @@ docker-compose up --build
 
 Requiere `config/.env` con credenciales de PostgreSQL para los servicios.
 
+## Notebook (1 comando)
+Para levantar JupyterLab con acceso a la base de datos:
+```bash
+docker compose up --build notebook
+```
+Luego abre `http://localhost:8888` y ejecuta `notebooks/02_executive_dashboard.ipynb`.
+
 Para replicar la estructura de carpetas de este proyecto, ejecuta `./setup_project.sh` en tu terminal.
 
 ## Endpoints API

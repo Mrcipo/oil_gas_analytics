@@ -5,3 +5,4 @@ pandas
 SQLAlchemy
 python-dotenv
 pytest
+requests

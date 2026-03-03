@@ -47,5 +47,23 @@ services:
       - ./api:/app/api
       - ./config:/app/config
 
+  notebook:
+    build:
+      context: .
+      dockerfile: docker/notebook.Dockerfile
+    container_name: oga_notebook
+    env_file:
+      - ./config/.env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./:/workspace
+
 volumes:
   db_data:

@@ -44,6 +44,7 @@ pandas
 sqlalchemy
 python-dotenv
 pytest
+requests
 EOF
 
 cat > .gitignore <<'EOF'

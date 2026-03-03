@@ -1,25 +1,30 @@
-﻿from pathlib import Path
+import os
 
-from src.extraction.extract import extract_sample_data
-from src.transformation.transform import transform_data
-from src.database.connection import get_connection, wait_for_db
-from src.database.repository import init_tables, save_dataframe
+from src.database.connection import wait_for_db
+from src.extraction.extract_data import run_extraction_and_load
+
+
+def ensure_database_url() -> None:
+    if os.getenv("DATABASE_URL"):
+        return
+
+    host = os.getenv("POSTGRES_HOST", "db")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
+    database = os.getenv("POSTGRES_DB")
+
+    if user and password and database:
+        os.environ["DATABASE_URL"] = (
+            f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+        )
 
 
 def run() -> None:
     wait_for_db()
-    data = extract_sample_data()
-    transformed = transform_data(data)
-
-    out = Path("data/processed/latest_run.csv")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    transformed.to_csv(out, index=False)
-
-    with get_connection() as conn:
-        init_tables(conn)
-        save_dataframe(conn, transformed)
-
-    print(f"ETL OK. Filas: {len(transformed)} | Archivo: {out}")
+    ensure_database_url()
+    total_rows = run_extraction_and_load()
+    print(f"ETL finalizado. Filas cargadas: {total_rows}")
 
 
 if __name__ == "__main__":
