@@ -16,6 +16,7 @@ services:
       retries: 20
 
   etl_service:
+    profiles: ["etl"]
     build:
       context: .
       dockerfile: src/Dockerfile
@@ -46,6 +47,9 @@ services:
     volumes:
       - ./api:/app/api
       - ./config:/app/config
+      - ./notebooks/models:/app/models:ro
+    environment:
+      MODEL_PATH: /app/models/xgboost_declinacion_v1.json
 
   notebook:
     build:
@@ -62,6 +66,27 @@ services:
         condition: service_healthy
     ports:
       - "8888:8888"
+    volumes:
+      - ./:/workspace
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/notebook.Dockerfile
+    container_name: oga_streamlit
+    env_file:
+      - ./config/.env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      PYTHONPATH: /workspace
+      MODEL_PATH: /workspace/notebooks/models/xgboost_declinacion_v1.json
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports:
+      - "8501:8501"
     volumes:
       - ./:/workspace
 

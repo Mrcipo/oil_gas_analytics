@@ -6,3 +6,7 @@ SQLAlchemy
 python-dotenv
 pytest
 requests
+scikit-learn
+xgboost
+streamlit
+plotly
