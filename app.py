@@ -261,18 +261,57 @@ inventory = inventory_base.merge(
     on="id_pozo",
     how="left",
 )
-inventory["pred_prod_pet"] = inventory["pred_prod_pet"].fillna(0.0)
-inventory["margen_estimado_usd"] = inventory["pred_prod_pet"] * precio_bbl - opex_fijo
-inventory["meses_al_cierre"] = inventory.apply(
+# Mantener semantica: NaN en prediccion = "sin prediccion", no convertir a cero.
+inventory["pred_prod_pet_raw"] = pd.to_numeric(inventory["pred_prod_pet"], errors="coerce")
+inventory["estado_prediccion"] = np.where(
+    inventory["pred_prod_pet_raw"].notna(),
+    "Prediccion disponible",
+    "Sin prediccion disponible",
+)
+inventory["pred_prod_pet_display"] = np.where(
+    inventory["pred_prod_pet_raw"].notna(),
+    inventory["pred_prod_pet_raw"].round(4).astype(str),
+    "Sin prediccion",
+)
+
+mask_pred = inventory["pred_prod_pet_raw"].notna()
+
+# Regla de negocio: pozo sin produccion reciente -> prediccion no confiable en UI.
+sin_produccion_reciente = (
+    inventory["prod_pet"].fillna(0).eq(0)
+    & inventory["target_lag_1"].fillna(0).eq(0)
+    & inventory["target_lag_3"].fillna(0).eq(0)
+)
+inventory["prediccion_confiable"] = np.where(mask_pred & sin_produccion_reciente, False, True)
+inventory["motivo_prediccion"] = np.where(
+    mask_pred & sin_produccion_reciente,
+    "Pozo sin produccion reciente. Prediccion no confiable.",
+    "",
+)
+inventory["mostrar_prediccion_en_ui"] = mask_pred & inventory["prediccion_confiable"]
+
+inventory["margen_estimado_usd"] = np.where(
+    mask_pred,
+    inventory["pred_prod_pet_raw"] * precio_bbl - opex_fijo,
+    np.nan,
+)
+
+# Solo calcular meses al cierre cuando existe prediccion.
+inventory["meses_al_cierre"] = np.nan
+inventory.loc[mask_pred, "meses_al_cierre"] = inventory.loc[mask_pred].apply(
     lambda r: estimate_months_to_closure(
-        prod_pred=float(r["pred_prod_pet"]),
+        prod_pred=float(r["pred_prod_pet_raw"]),
         threshold=threshold_bbl,
         lag1=float(r.get("target_lag_1", 0) or 0),
         lag3=float(r.get("target_lag_3", 0) or 0),
     ),
     axis=1,
 )
-inventory["Estado"] = inventory["meses_al_cierre"].map(classify_status)
+inventory["Estado"] = np.where(
+    mask_pred,
+    inventory["meses_al_cierre"].map(classify_status),
+    "Sin prediccion",
+)
 
 # KPIs
 kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
@@ -284,7 +323,9 @@ uptime_df = views["vw_uptime_mensual_empresa_yacimiento"].copy()
 uptime_latest = uptime_df[uptime_df["anio"] * 100 + uptime_df["mes"] == (uptime_df["anio"] * 100 + uptime_df["mes"]).max()]
 uptime_promedio = float(uptime_latest["uptime_pct"].mean()) if not uptime_latest.empty else 0.0
 
-pozos_alerta = int((inventory["pred_prod_pet"] * precio_bbl < opex_fijo).sum())
+pozos_alerta = int(
+    ((inventory["pred_prod_pet_raw"] * precio_bbl < opex_fijo) & mask_pred).sum()
+)
 
 kpi_col1.metric("Produccion Total Mensual", f"{prod_total_mensual:,.0f} bbl")
 kpi_col2.metric("Uptime Promedio Sistema", f"{uptime_promedio:,.2f}%")
@@ -314,12 +355,20 @@ inv_show = inv_view[
         "cuenca",
         "yacimiento",
         "prod_pet",
-        "pred_prod_pet",
+        "pred_prod_pet_display",
+        "estado_prediccion",
+        "prediccion_confiable",
         "margen_estimado_usd",
         "meses_al_cierre",
         "Estado",
     ]
 ].sort_values(["Estado", "margen_estimado_usd"])
+
+inv_show = inv_show.rename(
+    columns={
+        "pred_prod_pet_display": "pred_prod_pet",
+    }
+)
 
 rows_col1, rows_col2 = st.columns([1, 3])
 rows_opt = rows_col1.selectbox("Filas a mostrar", [500, 1000, 5000, 10000, "Todas"], index=2)
@@ -347,38 +396,75 @@ tech_col1.metric("Profundidad", f"{float(pozo_info['profundidad'] or 0):,.0f} m"
 tech_col2.metric("Reservorio", str(pozo_info["tipo_reservorio"]))
 tech_col3.metric("Yacimiento", str(pozo_info["yacimiento"]))
 
+st.write(f"**Estado de prediccion:** {pozo_info['estado_prediccion']}")
+if bool(pozo_info.get("prediccion_confiable", True)) is False:
+    st.warning("Pozo sin produccion reciente. Prediccion no confiable.")
+
 well_series = load_well_series(int(pozo_id_sel)).sort_values("fecha")
 plot_df = well_series[["fecha", "target", "pred_target"]].copy().tail(12)
 
-fig = go.Figure()
-fig.add_trace(
-    go.Scatter(
-        x=plot_df["fecha"],
-        y=plot_df["target"],
-        mode="lines+markers",
-        name="Real",
-        line=dict(color="#1f77b4", width=3),
+# Fuente de verdad semantica: estado de prediccion del inventario.
+estado_pred = str(pozo_info["estado_prediccion"])
+mostrar_pred_ui = bool(pozo_info.get("mostrar_prediccion_en_ui", False))
+if estado_pred == "Sin prediccion disponible" or not mostrar_pred_ui:
+    # Evita que residuos de pred_target dibujen una serie no valida.
+    plot_df["pred_target"] = np.nan
+
+has_real = plot_df["target"].notna().any()
+has_pred = (
+    plot_df["pred_target"].notna().any()
+    and estado_pred == "Prediccion disponible"
+    and mostrar_pred_ui
+)
+
+show_chart = True
+if not has_real and not has_pred:
+    st.info("No hay datos suficientes para mostrar el grafico de este pozo.")
+    show_chart = False
+
+if not has_real and has_pred:
+    st.warning(
+        "Inconsistencia detectada: hay prediccion pero no hay datos reales. "
+        "No se muestra grafico para este pozo."
     )
-)
-fig.add_trace(
-    go.Scatter(
-        x=plot_df["fecha"],
-        y=plot_df["pred_target"],
-        mode="lines+markers",
-        name="Predicha",
-        line=dict(color="#ff7f0e", width=3, dash="dash"),
+    show_chart = False
+
+if show_chart:
+    fig = go.Figure()
+    if has_real:
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df["fecha"],
+                y=plot_df["target"],
+                mode="lines+markers",
+                name="Real",
+                line=dict(color="#1f77b4", width=3),
+            )
+        )
+
+    if has_pred:
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df["fecha"],
+                y=plot_df["pred_target"],
+                mode="lines+markers",
+                name="Predicha",
+                line=dict(color="#ff7f0e", width=3, dash="dash"),
+            )
+        )
+    else:
+        st.info("Sin prediccion disponible para este pozo. Se muestra solo serie real.")
+
+    fig.update_layout(
+        title=f"Curva de Declinacion Real vs Predicha - Pozo {pozo_id_sel} (ultimos 12 meses)",
+        xaxis_title="Fecha",
+        yaxis_title="Produccion de petroleo (bbl)",
+        template="plotly_white",
+        height=470,
+        legend=dict(orientation="h", y=1.05, x=0.01),
+        margin=dict(l=30, r=30, t=70, b=40),
     )
-)
-fig.update_layout(
-    title=f"Curva de Declinacion Real vs Predicha - Pozo {pozo_id_sel} (ultimos 12 meses)",
-    xaxis_title="Fecha",
-    yaxis_title="Produccion de petroleo (bbl)",
-    template="plotly_white",
-    height=470,
-    legend=dict(orientation="h", y=1.05, x=0.01),
-    margin=dict(l=30, r=30, t=70, b=40),
-)
-st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
     "Datos de negocio consultados desde las 7 vistas SQL del esquema estrella. "
