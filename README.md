@@ -1,89 +1,276 @@
 # oil_gas_analytics
 
-Pipeline end-to-end de Data Engineering + Data Science para producción de petróleo y gas en Argentina, 100% dockerizado.
+Proyecto end-to-end de Data Engineering, Analytics y Forecasting para produccion de petroleo y gas en Argentina, completamente dockerizado.
 
-## 1. Arquitectura
+Combina:
+- pipeline ETL reproducible
+- data warehouse en PostgreSQL con esquema estrella
+- metricas de negocio para BI
+- modelo de forecasting por pozo con XGBoost
+- API en FastAPI
+- dashboard operativo en Streamlit
+- notebooks analiticos y de modelado
 
-Flujo de datos:
-1. Ingesta ETL por año desde el portal oficial de Energía (CKAN/API + CSV).
-2. Estandarización y carga incremental en PostgreSQL.
-3. Modelado analítico en esquema estrella (`fact_produccion` + dimensiones).
-4. Exposición de métricas y predicciones vía FastAPI.
-5. Exploración y reporting ejecutivo en notebooks.
+## Objetivo
+
+Construir una solucion portfolio-ready para monitoreo y analisis de produccion por pozo, con foco en:
+- ingesta y normalizacion de datos publicos de energia
+- modelado analitico en estrella
+- explotacion via vistas SQL
+- forecasting condicional por estado operativo del pozo
+- exposicion de resultados por API y dashboard
+
+## Arquitectura
+
+Flujo principal:
+1. ETL por anio desde el portal de datos de Energia.
+2. Limpieza y estandarizacion en Python.
+3. Carga incremental en PostgreSQL.
+4. Modelado en esquema estrella.
+5. Exposicion de vistas de negocio.
+6. Scoring de forecasting por pozo.
+7. Consumo desde FastAPI, Streamlit y notebooks.
 
 Servicios Docker:
-- `db`: PostgreSQL 15 (`localhost:5437` para DBeaver/pgAdmin).
-- `etl_service`: extracción, limpieza y carga de datos.
-- `api_service`: API de métricas y scoring de pozos.
-- `notebook`: JupyterLab para análisis y modelado.
+- `db`: PostgreSQL 15 en `localhost:5437`
+- `api_service`: API FastAPI en `localhost:8000`
+- `notebook`: JupyterLab en `localhost:8888`
+- `streamlit`: dashboard operativo en `localhost:8501`
+- `etl_service`: pipeline ETL bajo perfil `etl` para ejecucion explicita
 
-## 2. Stack Tecnológico
+## Stack Tecnologico
 
-- `Python`: pandas, SQLAlchemy, psycopg, scikit-learn, XGBoost.
-- `PostgreSQL`: data warehouse en esquema estrella + vistas de negocio.
-- `FastAPI`: endpoints de consumo para BI y aplicaciones.
-- `Docker Compose`: orquestación reproducible sin dependencias locales.
-- `Jupyter`: análisis exploratorio, dashboard ejecutivo y forecasting.
+- `Python`
+- `pandas`
+- `SQLAlchemy`
+- `psycopg`
+- `PostgreSQL`
+- `FastAPI`
+- `Streamlit`
+- `XGBoost`
+- `scikit-learn`
+- `pytest`
+- `Docker Compose`
+- `JupyterLab`
 
-## 3. Estructura del Proyecto
+## Estructura del Proyecto
 
-- `data/`: `raw`, `processed`, `external`.
-- `src/`: ETL, capa de datos, feature engineering y utilidades.
-- `sql/`: scripts DDL de inicialización y métricas de negocio.
-- `api/`: backend FastAPI.
-- `notebooks/`: dashboards y entrenamiento de modelos.
-- `config/`: variables de entorno (`.env.example` y `.env` local).
-- `tests/`: pruebas.
+- `api/`: backend FastAPI
+- `config/`: variables de entorno
+- `data/`: datos raw, processed y external
+- `docker/`: Dockerfiles auxiliares
+- `notebooks/`: analisis, dashboard ejecutivo y forecasting
+- `sql/`: inicializacion DDL y vistas de negocio
+- `src/`: ETL, features, dominio y validaciones
+- `tests/`: tests unitarios con pytest
+- `app.py`: dashboard Streamlit
+- `docker-compose.yml`: orquestacion del stack
 
-Para replicar la estructura base:
+## Puesta en Marcha
+
+1. Crear el archivo de entorno:
+
 ```bash
-./setup_project.sh
+cp config/.env.example config/.env
 ```
 
-## 4. Puesta en Marcha
+2. Levantar servicios principales:
 
-1. Crear `config/.env` a partir de `config/.env.example`.
-2. Levantar stack completo:
 ```bash
-docker compose up --build
+docker compose up -d --build db api_service notebook streamlit
 ```
 
-Servicios:
+Servicios disponibles:
 - API: `http://localhost:8000`
+- Streamlit: `http://localhost:8501`
 - JupyterLab: `http://localhost:8888`
-- PostgreSQL host: `localhost:5437`
+- PostgreSQL: `localhost:5437`
 
-## 5. Endpoints API
+## ETL
 
-- `GET /health`: estado de la API y del modelo.
-- `GET /runs?limit=20`: últimas ejecuciones ETL.
-- `GET /metrics/{cuenca}`: métricas de negocio por cuenca desde PostgreSQL.
-- `GET /predict/{pozo_id}`: predicción de producción de petróleo del próximo mes para un pozo.
+El ETL no arranca por defecto. Esta configurado bajo `profile` para evitar recargas accidentales del pipeline.
+
+Ejecutar ETL manualmente:
+
+```bash
+docker compose --profile etl up etl_service
+```
+
+Ejecutar ETL en background:
+
+```bash
+docker compose --profile etl up -d etl_service
+```
+
+## Modelo de Datos
+
+El proyecto usa un esquema estrella en PostgreSQL con:
+- `fact_produccion`
+- `dim_empresa`
+- `dim_geografia`
+- `dim_pozo`
+- `dim_tiempo`
+
+Esto permite analisis por:
+- cuenca
+- provincia
+- yacimiento
+- empresa
+- pozo
+- fecha
+
+## Vistas de Negocio
+
+El archivo `sql/business_metrics.sql` crea vistas para consumo analitico y dashboards.
+
+Principales vistas:
+- `vw_rentabilidad_cuenca_anual`
+- `vw_uptime_mensual_empresa_yacimiento`
+- `vw_recuperacion_secundaria_mensual`
+- `vw_water_cut_mensual_pozo`
+- `vw_gor_empresa_anual`
+- `vw_pareto_pozos_cuenca_detalle`
+- `vw_pareto_pozos_cuenca_resumen`
+
+## Forecasting por Pozo
+
+El forecasting usa `XGBoost Regressor` y features temporales derivadas de produccion mensual por pozo.
+
+Features principales:
+- `target_lag_1`
+- `target_lag_3`
+- `target_lag_6`
+- `target_roll_mean_6`
+- `target_roll_std_6`
+- `edad_pozo_meses`
+- `streak_ceros`
+- variables one-hot de reservorio
+
+### Mejora conceptual implementada
+
+El pipeline fue refactorizado para separar dos problemas distintos:
+1. `estado_operativo`: determinar si el pozo sigue activo
+2. `forecast productivo`: estimar cuanto produciria solo si sigue activo
+
+Salidas clave:
+- `pred_prod_pet_modelo`: salida cruda del modelo
+- `estado_operativo`: `Activo` / `Inactivo`
+- `pred_prod_pet_final`: forecast final usable en UI
+- `prediccion_confiable`: bandera de confiabilidad
+
+Regla operativa actual:
+- si `prod_pet == 0`
+- y `target_lag_1 == 0`
+- y `target_lag_3 == 0`
+entonces el pozo se considera `Inactivo`
+
+En esos casos:
+- el forecast queda oculto en UI
+- la linea predicha no se dibuja en el grafico
+- se informa el motivo al usuario
+
+## Dashboard Streamlit
+
+El dashboard en `app.py` permite:
+- visualizar KPIs operativos
+- explorar inventario de pozos
+- filtrar por cuenca y empresa
+- revisar estado operativo del pozo
+- ver forecast solo cuando aplica
+- analizar el detalle de un pozo en un grafico Real vs Predicha
+
+Incluye:
+- parametros economicos en sidebar
+- estado de prediccion
+- estado operativo
+- motivo del forecast
+- logica para ocultar predicciones no confiables
+
+## API FastAPI
+
+Endpoints disponibles:
+- `GET /health`
+- `GET /runs`
+- `GET /metrics/{cuenca}`
+- `GET /predict/{pozo_id}`
 
 Ejemplos:
+
 ```bash
+curl http://localhost:8000/health
 curl http://localhost:8000/metrics/Neuquina
 curl http://localhost:8000/predict/132
 ```
 
-## 6. Modelo de ML
+## Notebooks
 
-- Algoritmo: `XGBoost Regressor`.
-- Features: lags (`t-1`, `t-3`, `t-6`), rolling stats 6 meses, edad del pozo, variables estáticas de reservorio.
-- Artefacto: `notebooks/models/xgboost_declinacion_v1.json`.
-- El contenedor `api_service` monta el modelo en `/app/models`.
+Notebooks principales:
+- `notebooks/02_executive_dashboard.ipynb`
+- `notebooks/03_forecasting_declinacion.ipynb`
 
-## 7. Hallazgos de Negocio (Resumen)
+Cubren:
+- metricas ejecutivas
+- visualizacion analitica
+- feature engineering temporal
+- entrenamiento y validacion del modelo
+- analisis de importancia de variables
 
-- La productividad está concentrada en un subconjunto reducido de pozos (patrón Pareto por cuenca).
-- `lag_1`, `lag_3`, `lag_6` y la edad del pozo son variables con alto poder explicativo de la declinación.
-- El `water cut` creciente identifica activos maduros con posible deterioro de performance.
-- El `uptime` mensual permite detectar ineficiencias operativas por empresa y yacimiento.
-- La relación inyección/producción aporta señal para evaluar respuesta de recuperación secundaria.
+## Tests
 
-## 8. Roadmap Técnico
+El proyecto ya tiene una primera suite unitaria con `pytest`, enfocada en logica critica y reusable.
 
-- Versionado de modelos (MLflow o registry simple por versión).
-- Pruebas automatizadas de calidad de datos (Great Expectations).
-- Serving de predicción batch/online con caché de features por pozo.
-- CI/CD para build, tests, linters y despliegue.
+Archivos:
+- `tests/test_temporal_features.py`
+- `tests/test_operational_rules.py`
+- `tests/test_data_quality.py`
+
+Cobertura inicial:
+- generacion correcta de lags
+- no mezclar series entre pozos
+- calculo de `streak_ceros`
+- regla de pozo inactivo
+- forecast condicional segun estado operativo
+- validacion de negativos en `prod_pet`
+- validacion de duplicados por `(id_pozo, fecha)`
+
+Ejecutar tests:
+
+```bash
+docker compose exec -T streamlit python -m pytest /workspace/tests -v
+```
+
+## Calidad de Datos
+
+Se agrego una validacion reusable para datasets productivos:
+- rechazo de `prod_pet < 0`
+- rechazo de duplicados en `(id_pozo, fecha)`
+
+Modulo:
+- `src/validation/data_quality.py`
+
+## Hallazgos de Negocio
+
+Hallazgos obtenidos hasta ahora:
+- la produccion esta concentrada en un subconjunto reducido de pozos
+- los lags recientes explican gran parte de la dinamica productiva
+- el `water cut` es util para detectar activos maduros
+- el `uptime` permite monitorear eficiencia operativa
+- separar actividad operativa de forecast productivo mejora consistencia de negocio
+
+## Estado Actual
+
+El proyecto ya permite:
+- levantar base y servicios con Docker
+- correr ETL manualmente
+- consultar metricas via API
+- monitorear pozos desde Streamlit
+- ejecutar tests unitarios
+- trabajar notebooks sobre el mismo entorno reproducible
+
+## Proximos Pasos
+
+- reentrenar el modelo incorporando explicitamente `streak_ceros` y `estado_operativo`
+- agregar CI para tests automaticos
+- ampliar cobertura de tests a ETL y SQL
+- versionar modelos de forecasting
+- mejorar performance del dashboard con mas preagregaciones
