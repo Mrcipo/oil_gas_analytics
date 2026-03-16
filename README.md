@@ -1,4 +1,4 @@
-# oil_gas_analytics
+# Oil_gas_analytics
 
 Proyecto end-to-end de Data Engineering, Analytics y Forecasting para produccion de petroleo y gas en Argentina, completamente dockerizado.
 
