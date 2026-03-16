@@ -11,6 +11,10 @@ import streamlit as st
 from sqlalchemy import text
 from xgboost import XGBRegressor
 
+from src.domain.operational_rules import (
+    apply_operational_forecast_rules,
+    derive_operational_state,
+)
 from src.features.temporal_features import (
     build_engine_from_env,
     build_feature_dataset,
@@ -174,7 +178,27 @@ def load_latest_features_and_predictions() -> pd.DataFrame:
     latest = feat_df.groupby("id_pozo", as_index=False).tail(1).copy()
 
     X = latest.reindex(columns=model_features, fill_value=0)
-    latest["pred_prod_pet"] = model.predict(X).astype(float)
+    latest["pred_prod_pet_modelo"] = model.predict(X).astype(float)
+
+    latest["estado_operativo"] = latest.apply(
+        lambda row: derive_operational_state(
+            prod_pet=row["target"],
+            target_lag_1=row["target_lag_1"],
+            target_lag_3=row["target_lag_3"],
+            streak_ceros=row.get("streak_ceros"),
+        ),
+        axis=1,
+    )
+
+    forecast_rules = latest.apply(
+        lambda row: apply_operational_forecast_rules(
+            pred_prod_pet_modelo=row["pred_prod_pet_modelo"],
+            estado_operativo=row["estado_operativo"],
+        ),
+        axis=1,
+        result_type="expand",
+    )
+    latest = pd.concat([latest, forecast_rules], axis=1)
     return latest
 
 
@@ -256,13 +280,29 @@ threshold_bbl = opex_fijo / max(precio_bbl, 1)
 
 inventory = inventory_base.merge(
     latest_pred[
-        ["id_pozo", "pred_prod_pet", "target_lag_1", "target_lag_3", "target_lag_6"]
+        [
+            "id_pozo",
+            "target",
+            "target_lag_1",
+            "target_lag_3",
+            "target_lag_6",
+            "streak_ceros",
+            "estado_operativo",
+            "pred_prod_pet_modelo",
+            "pred_prod_pet_final",
+        ]
     ],
     on="id_pozo",
     how="left",
 )
 # Mantener semantica: NaN en prediccion = "sin prediccion", no convertir a cero.
-inventory["pred_prod_pet_raw"] = pd.to_numeric(inventory["pred_prod_pet"], errors="coerce")
+inventory["pred_prod_pet_modelo"] = pd.to_numeric(
+    inventory["pred_prod_pet_modelo"], errors="coerce"
+)
+inventory["pred_prod_pet_final"] = pd.to_numeric(
+    inventory["pred_prod_pet_final"], errors="coerce"
+)
+inventory["pred_prod_pet_raw"] = inventory["pred_prod_pet_final"]
 inventory["estado_prediccion"] = np.where(
     inventory["pred_prod_pet_raw"].notna(),
     "Prediccion disponible",
@@ -275,20 +315,12 @@ inventory["pred_prod_pet_display"] = np.where(
 )
 
 mask_pred = inventory["pred_prod_pet_raw"].notna()
-
-# Regla de negocio: pozo sin produccion reciente -> prediccion no confiable en UI.
-sin_produccion_reciente = (
-    inventory["prod_pet"].fillna(0).eq(0)
-    & inventory["target_lag_1"].fillna(0).eq(0)
-    & inventory["target_lag_3"].fillna(0).eq(0)
+inventory["estado_operativo"] = inventory["estado_operativo"].fillna("Inactivo")
+inventory["prediccion_confiable"] = inventory["prediccion_confiable"].fillna(False)
+inventory["motivo_prediccion"] = inventory["motivo_prediccion"].fillna(
+    "Sin prediccion disponible."
 )
-inventory["prediccion_confiable"] = np.where(mask_pred & sin_produccion_reciente, False, True)
-inventory["motivo_prediccion"] = np.where(
-    mask_pred & sin_produccion_reciente,
-    "Pozo sin produccion reciente. Prediccion no confiable.",
-    "",
-)
-inventory["mostrar_prediccion_en_ui"] = mask_pred & inventory["prediccion_confiable"]
+inventory["mostrar_prediccion_en_ui"] = inventory["mostrar_prediccion_en_ui"].fillna(False)
 
 inventory["margen_estimado_usd"] = np.where(
     mask_pred,
@@ -355,9 +387,11 @@ inv_show = inv_view[
         "cuenca",
         "yacimiento",
         "prod_pet",
+        "estado_operativo",
         "pred_prod_pet_display",
         "estado_prediccion",
         "prediccion_confiable",
+        "motivo_prediccion",
         "margen_estimado_usd",
         "meses_al_cierre",
         "Estado",
@@ -397,8 +431,11 @@ tech_col2.metric("Reservorio", str(pozo_info["tipo_reservorio"]))
 tech_col3.metric("Yacimiento", str(pozo_info["yacimiento"]))
 
 st.write(f"**Estado de prediccion:** {pozo_info['estado_prediccion']}")
+st.write(f"**Estado operativo:** {pozo_info['estado_operativo']}")
+if str(pozo_info.get("motivo_prediccion", "")):
+    st.write(f"**Motivo forecast:** {pozo_info['motivo_prediccion']}")
 if bool(pozo_info.get("prediccion_confiable", True)) is False:
-    st.warning("Pozo sin produccion reciente. Prediccion no confiable.")
+    st.warning("Pozo sin produccion reciente. Forecast oculto por inactividad operativa.")
 
 well_series = load_well_series(int(pozo_id_sel)).sort_values("fecha")
 plot_df = well_series[["fecha", "target", "pred_target"]].copy().tail(12)
@@ -453,7 +490,7 @@ if show_chart:
             )
         )
     else:
-        st.info("Sin prediccion disponible para este pozo. Se muestra solo serie real.")
+        st.info("Forecast no aplicable para este pozo. Se muestra solo serie real.")
 
     fig.update_layout(
         title=f"Curva de Declinacion Real vs Predicha - Pozo {pozo_id_sel} (ultimos 12 meses)",

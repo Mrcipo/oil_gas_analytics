@@ -8,6 +8,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
 
+def compute_zero_streak(series: pd.Series) -> pd.Series:
+    streak = 0
+    values: list[int] = []
+    for value in series.fillna(0):
+        if value == 0:
+            streak += 1
+        else:
+            streak = 0
+        values.append(streak)
+    return pd.Series(values, index=series.index)
+
+
 def build_engine_from_env() -> Engine:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
@@ -149,6 +161,19 @@ def _add_rolling_features(
     return out
 
 
+def _add_zero_streak_feature(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+) -> pd.DataFrame:
+    out = df.copy()
+    # Cuenta meses consecutivos recientes con produccion cero por pozo.
+    out["streak_ceros"] = out.groupby(group_col, group_keys=False)[value_col].apply(
+        compute_zero_streak
+    )
+    return out
+
+
 def _add_well_age_feature(
     df: pd.DataFrame,
     group_col: str = "id_pozo",
@@ -203,6 +228,7 @@ def build_feature_dataset(
     out = _add_rolling_features(
         out, value_col=value_col, group_col=group_col, window=rolling_window
     )
+    out = _add_zero_streak_feature(out, value_col=value_col, group_col=group_col)
     out = _add_well_age_feature(out, group_col=group_col, date_col="fecha")
     out = _add_static_ohe(out)
     if downcast:
