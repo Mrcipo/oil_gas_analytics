@@ -185,6 +185,12 @@ Current operating rule: a well is considered `Inactivo` when `prod_pet == 0`, `t
 
 It also includes economic parameters in the sidebar, prediction status, operating status, the reason behind the forecast, and logic to hide unreliable predictions.
 
+> 📷 **Screenshot pending.** The dashboard needs the production data from
+> [datos.energia.gob.ar](http://datos.energia.gob.ar/) loaded in PostgreSQL, so no capture is included
+> yet. To add one: run the pipeline, start `streamlit run app.py`, and save the capture as
+> `docs/dashboard.png`.
+<!-- TODO: replace the note above with ![Streamlit dashboard](docs/dashboard.png) -->
+
 ## FastAPI
 
 Available endpoints:

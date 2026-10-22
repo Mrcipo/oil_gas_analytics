@@ -185,6 +185,12 @@ Regla operativa actual: un pozo se considera `Inactivo` si `prod_pet == 0`, `tar
 
 Incluye parámetros económicos en el sidebar, estado de la predicción, estado operativo, motivo del forecast y lógica para ocultar predicciones no confiables.
 
+> 📷 **Captura pendiente.** El dashboard necesita los datos de producción de
+> [datos.energia.gob.ar](http://datos.energia.gob.ar/) cargados en PostgreSQL, por eso todavía no hay
+> captura. Para agregarla: correr el pipeline, levantar `streamlit run app.py` y guardar la imagen como
+> `docs/dashboard.png`.
+<!-- TODO: reemplazar la nota de arriba por ![Dashboard Streamlit](docs/dashboard.png) -->
+
 ## API FastAPI
 
 Endpoints disponibles:
